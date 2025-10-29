@@ -1,0 +1,14 @@
+{
+  "timezone": "America/Toronto",
+  "calendarId": "your-id-here@group.calendar.google.com",
+  "locations": {
+    "Gellert": {
+      "address": "10241 Eighth Line, Georgetown, ON",
+      "colorId": "9"
+    },
+    "Acton": {
+      "address": "69 Acton Bvld., Acton, ON",
+      "colorId": "5"
+    }
+  }
+}

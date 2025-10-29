@@ -3,16 +3,26 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
+    "clear": "node --loader ts-node/esm ./src/clear_swim_events.ts",
+    "create": "node --loader ts-node/esm ./src/create_swim_events.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "csv-parse": "^6.1.0",
     "dayjs": "^1.11.18",
     "googleapis": "^164.1.0",
     "minimist": "^1.2.8",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
     "yargs": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.2",
+    "@types/yargs": "^17.0.34"
   }
 }

@@ -2,3 +2,5 @@ node_modules/
 token.json
 credentials.json
 calendar.json
+data/config.json
+README_INTERNAL.md

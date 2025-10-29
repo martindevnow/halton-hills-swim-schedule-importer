@@ -14,20 +14,13 @@
 // - --privateKey filters by a single private extended property (key=value).
 // - Requires credentials.json (OAuth desktop) beside this file; creates token.json on first run.
 
-import fs from "node:fs";
-import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { google } from "googleapis";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SCOPES = ["https://www.googleapis.com/auth/calendar.events"];
-const TOKEN_PATH = path.join(__dirname, "token.json");
-const CREDENTIALS_PATH = path.join(__dirname, "credentials.json");
+import { isoLocalStart, parsePrivateFilter } from "./utils/helpers.js";
+import { authorize } from "./utils/auth.js";
+import { deleteEvent, listEvents } from "./utils/calendar.js";
 
 // ---- CLI args (ESM) --------------------------------------------------------
 
@@ -74,147 +67,6 @@ const argv = yargs(hideBin(process.argv))
   .help()
   .parseSync();
 
-// ---- Helpers ----------------------------------------------------------------
-
-function readJSONSync(p) {
-  return JSON.parse(fs.readFileSync(p, "utf8"));
-}
-
-function writeJSONSync(p, obj) {
-  fs.writeFileSync(p, JSON.stringify(obj, null, 2));
-}
-
-function parsePrivateFilter(str) {
-  if (!str) return null;
-  const eq = str.indexOf("=");
-  if (eq === -1) throw new Error("--privateKey must be key=value");
-  const key = str.slice(0, eq).trim();
-  const val = str.slice(eq + 1).trim();
-  if (!key || !val) throw new Error("--privateKey must be key=value");
-  return `${key}=${val}`;
-}
-
-// Convert YYYY-MM-DD as "local midnight" in a given IANA timezone to RFC3339 UTC.
-// Works without extra deps by using Intl to get the local parts, then building a Date.
-function isoLocalStart(dateStr, tz) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = fmt
-    .formatToParts(d)
-    .reduce((o, p) => ((o[p.type] = p.value), o), {});
-  // This Date is in local wall time, interpreted by host tz. Adjust to UTC string.
-  const local = new Date(
-    `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`
-  );
-  return new Date(
-    local.getTime() - local.getTimezoneOffset() * 60000
-  ).toISOString();
-}
-
-// ---- Auth (ESM) -------------------------------------------------------------
-
-async function authorize() {
-  const credentials = readJSONSync(CREDENTIALS_PATH);
-  const { client_secret, client_id, redirect_uris } = credentials.installed;
-  const oAuth2Client = new google.auth.OAuth2(
-    client_id,
-    client_secret,
-    redirect_uris[0]
-  );
-
-  try {
-    const token = readJSONSync(TOKEN_PATH);
-    oAuth2Client.setCredentials(token);
-    return oAuth2Client;
-  } catch {
-    return getNewToken(oAuth2Client);
-  }
-}
-
-function getNewToken(oAuth2Client) {
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: "offline",
-    scope: SCOPES,
-  });
-  console.log("\nAuthorize this app by visiting this URL:\n", authUrl, "\n");
-  process.stdout.write("Paste the code here and press Enter: ");
-
-  return new Promise((resolve) => {
-    process.stdin.setEncoding("utf8");
-    process.stdin.once("data", async (code) => {
-      try {
-        const { tokens } = await oAuth2Client.getToken(code.trim());
-        oAuth2Client.setCredentials(tokens);
-        writeJSONSync(TOKEN_PATH, tokens);
-        console.log("Token saved to", TOKEN_PATH);
-        resolve(oAuth2Client);
-      } catch (err) {
-        console.error("Error retrieving access token", err);
-        process.exit(1);
-      }
-    });
-  });
-}
-
-// ---- Calendar ops -----------------------------------------------------------
-
-async function listEvents(calendar, opts) {
-  const results = [];
-  let pageToken;
-
-  const params = {
-    calendarId: opts.calendarId,
-    timeMin: opts.timeMin,
-    timeMax: opts.timeMax,
-    singleEvents: true, // expand recurring instances
-    maxResults: 2500,
-    orderBy: "startTime",
-  };
-  if (opts.privateExtendedProperty)
-    params.privateExtendedProperty = opts.privateExtendedProperty;
-
-  do {
-    const res = await calendar.events.list({ ...params, pageToken });
-    const items = res.data.items || [];
-    results.push(...items);
-    pageToken = res.data.nextPageToken;
-  } while (pageToken);
-
-  return results;
-}
-
-async function deleteEvent(calendar, calendarId, eventId) {
-  const maxRetries = 5;
-  let attempt = 0;
-  while (true) {
-    try {
-      await calendar.events.delete({ calendarId, eventId });
-      return;
-    } catch (e) {
-      const status = e?.code || e?.response?.status;
-      if (
-        attempt < maxRetries &&
-        [403, 429, 500, 502, 503, 504].includes(status)
-      ) {
-        const delay = Math.min(1000 * 2 ** attempt, 10000);
-        await new Promise((r) => setTimeout(r, delay));
-        attempt++;
-      } else {
-        throw e;
-      }
-    }
-  }
-}
-
 // ---- Main -------------------------------------------------------------------
 
 async function main() {
@@ -258,7 +110,7 @@ async function main() {
   }
 
   const instanceDeletes = [];
-  const seriesIds = new Set();
+  const seriesIds = new Set<string>();
 
   for (const ev of events) {
     const startStr = ev.start?.dateTime || ev.start?.date;
@@ -295,7 +147,7 @@ async function main() {
     try {
       await deleteEvent(calendar, calendarId, id);
       console.log(`Deleted instance: ${id}`);
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Failed to delete instance ${id}:`, e.message || e);
     }
   }
@@ -304,7 +156,7 @@ async function main() {
     try {
       await deleteEvent(calendar, calendarId, sid);
       console.log(`Deleted series: ${sid}`);
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Failed to delete series ${sid}:`, e.message || e);
     }
   }
@@ -312,7 +164,12 @@ async function main() {
   console.log("\nDone.");
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    console.log("Main complete");
+    process.exit(0);
+  })
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
