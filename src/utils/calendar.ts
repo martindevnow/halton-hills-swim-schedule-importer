@@ -63,13 +63,21 @@ export const deleteEvent = async (
 };
 
 // ---------- event creation helpers ----------
-export const inferColorId = (place: string, cfg: { places: any }) => {
-  const c = cfg.places?.[place]?.colorId;
-  return c || "1";
+const placeConfig = (place: string, cfg: any) => {
+  return cfg.locations?.[place] ?? cfg.places?.[place] ?? null;
+};
+
+export const inferColorId = (place: string, cfg: any) => {
+  const raw = placeConfig(place, cfg)?.colorId ?? cfg.colorId;
+  if (raw === undefined || raw === null || raw === "") return "1";
+  return String(raw);
 };
 
 export const resolveLocation = (place: string, cfg: any) => {
-  return cfg.places?.[place]?.location || cfg.location || "";
+  const locCfg = placeConfig(place, cfg);
+  return (
+    locCfg?.address || locCfg?.location || cfg.location || cfg.address || ""
+  );
 };
 
 export const makePrivateKey = (
@@ -139,7 +147,7 @@ export const createRecurringEvent = async (
     console.log(
       `[DRY-RUN] ${event.summary} | ${place} | BYDAY=${byDay} | ` +
         `${event.start.dateTime} → ${event.end.dateTime} (${event.start.timeZone}) | ` +
-        `location="${event.location}" colorId=${event.colorId} | ${event.recurrence[0]}`
+        `location="${event.location}" colorId=${event.colorId} | ${event.recurrence[0]}, key: ${event.extendedProperties.private.key}`
     );
     return;
   }
