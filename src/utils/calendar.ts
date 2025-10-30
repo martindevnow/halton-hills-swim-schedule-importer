@@ -10,11 +10,62 @@ import {
   type ByDay,
 } from "./helpers.js";
 
-export const listEvents = async (calendar: calendar_v3.Calendar, opts: any) => {
-  const results = [];
-  let pageToken;
+export type PoolLocationConfig = {
+  address?: string;
+  location?: string;
+  colorId?: string | number;
+};
 
-  const params: any = {
+export type CalendarConfig = {
+  timezone: string;
+  calendarId: string;
+  locations?: Record<string, PoolLocationConfig>;
+  places?: Record<string, PoolLocationConfig>;
+  colorId?: string | number;
+  location?: string;
+  address?: string;
+};
+
+type ListEventsOptions = {
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  privateExtendedProperty?: string | string[];
+};
+
+type ScheduleSeason = {
+  startDate: string;
+  endDate: string;
+};
+
+export type ScheduleRule = {
+  summary: string;
+  description?: string;
+  startTime: string;
+  endTime: string;
+  byDay: ByDay[];
+  season: ScheduleSeason;
+  _place: string;
+};
+
+type PreviewInfo = {
+  place: string;
+  byDay: ByDay;
+  startDate: string;
+  endDate: string;
+  untilZ: string;
+};
+
+type PreviewEvent = calendar_v3.Schema$Event & { _preview: PreviewInfo };
+
+export const listEvents = async (
+  calendar: calendar_v3.Calendar,
+  opts: ListEventsOptions
+) => {
+  const results: calendar_v3.Schema$Event[] = [];
+  let pageToken: string | undefined;
+
+  const params: calendar_v3.Params$Resource$Events$List = {
     calendarId: opts.calendarId,
     timeMin: opts.timeMin,
     timeMax: opts.timeMax,
@@ -22,14 +73,20 @@ export const listEvents = async (calendar: calendar_v3.Calendar, opts: any) => {
     maxResults: 2500,
     orderBy: "startTime",
   };
-  if (opts.privateExtendedProperty)
-    params.privateExtendedProperty = opts.privateExtendedProperty;
+  if (opts.privateExtendedProperty) {
+    params.privateExtendedProperty = Array.isArray(opts.privateExtendedProperty)
+      ? opts.privateExtendedProperty
+      : [opts.privateExtendedProperty];
+  }
 
   do {
-    const res: any = await calendar.events.list({ ...params, pageToken });
-    const items = res.data.items || [];
+    const request: calendar_v3.Params$Resource$Events$List = pageToken
+      ? { ...params, pageToken }
+      : { ...params };
+    const res = await calendar.events.list(request);
+    const items = res.data.items ?? [];
     results.push(...items);
-    pageToken = res.data.nextPageToken;
+    pageToken = res.data.nextPageToken ?? undefined;
   } while (pageToken);
 
   return results;
@@ -46,34 +103,44 @@ export const deleteEvent = async (
     try {
       await calendar.events.delete({ calendarId, eventId });
       return;
-    } catch (e: any) {
-      const status = e?.code || e?.response?.status;
+    } catch (err: unknown) {
+      const status = extractStatusCode(err);
       if (
         attempt < maxRetries &&
+        status !== undefined &&
         [403, 429, 500, 502, 503, 504].includes(status)
       ) {
         const delay = Math.min(1000 * 2 ** attempt, 10000);
         await new Promise((r) => setTimeout(r, delay));
         attempt++;
       } else {
-        throw e;
+        throw err;
       }
     }
   }
 };
 
 // ---------- event creation helpers ----------
-const placeConfig = (place: string, cfg: any) => {
+const extractStatusCode = (err: unknown): number | undefined => {
+  if (!err || typeof err !== "object") return undefined;
+  const candidate = err as {
+    code?: number;
+    response?: { status?: number };
+  };
+  return candidate.code ?? candidate.response?.status;
+};
+
+const placeConfig = (place: string, cfg: CalendarConfig) => {
   return cfg.locations?.[place] ?? cfg.places?.[place] ?? null;
 };
 
-export const inferColorId = (place: string, cfg: any) => {
+export const inferColorId = (place: string, cfg: CalendarConfig) => {
   const raw = placeConfig(place, cfg)?.colorId ?? cfg.colorId;
   if (raw === undefined || raw === null || raw === "") return "1";
   return String(raw);
 };
 
-export const resolveLocation = (place: string, cfg: any) => {
+export const resolveLocation = (place: string, cfg: CalendarConfig) => {
   const locCfg = placeConfig(place, cfg);
   return (
     locCfg?.address || locCfg?.location || cfg.location || cfg.address || ""
@@ -81,17 +148,18 @@ export const resolveLocation = (place: string, cfg: any) => {
 };
 
 export const makePrivateKey = (
-  rule: any,
-  byDay: any,
+  rule: ScheduleRule,
+  byDay: ByDay,
+  place: string,
   seasonStart: string,
   seasonEnd: string
 ) => {
-  return `${rule.summary}-${byDay}-${rule.startTime}-${rule.endTime}-${seasonStart}-${seasonEnd}`;
+  return `${rule.summary}-${place}-${byDay}-${rule.startTime}-${rule.endTime}-${seasonStart}-${seasonEnd}`;
 };
 
 export const buildEventObject = (
-  cfg: any,
-  rule: any,
+  cfg: CalendarConfig,
+  rule: ScheduleRule,
   byDay: ByDay,
   place: string
 ) => {
@@ -99,11 +167,23 @@ export const buildEventObject = (
   const { startDate, endDate } = rule.season;
   const [sH, sM] = rule.startTime.split(":").map(Number);
   const [eH, eM] = rule.endTime.split(":").map(Number);
-
   const loc = resolveLocation(place, cfg);
   const colorId = inferColorId(place, cfg);
 
-  const first = firstOccurrenceOnOrAfter(startDate, BYDAY_TO_INDEX[byDay]);
+  const dayIndex = BYDAY_TO_INDEX[byDay];
+  if (dayIndex === undefined)
+    throw new Error(`Unsupported BYDAY value: ${byDay}`);
+
+  if (
+    sH === undefined ||
+    sM === undefined ||
+    eH === undefined ||
+    eM === undefined
+  ) {
+    throw new Error(`Invalid time range parsed for ${rule.summary}`);
+  }
+
+  const first = firstOccurrenceOnOrAfter(startDate, dayIndex);
   const startDT = localDateTimeString(first.y, first.m, first.d, sH, sM, 0);
   const endDT = localDateTimeString(first.y, first.m, first.d, eH, eM, 0);
 
@@ -113,7 +193,7 @@ export const buildEventObject = (
     tz
   );
 
-  const event = {
+  const event: PreviewEvent = {
     summary: rule.summary,
     description: rule.description || "",
     location: loc,
@@ -124,7 +204,7 @@ export const buildEventObject = (
     extendedProperties: {
       private: {
         source: "pool-schedule",
-        key: makePrivateKey(rule, byDay, startDate, endDate),
+        key: makePrivateKey(rule, byDay, place, startDate, endDate),
       },
     },
     _preview: { place, byDay, startDate: startDT, endDate: endDT, untilZ },
@@ -133,28 +213,38 @@ export const buildEventObject = (
 };
 
 export const createRecurringEvent = async (
-  calendar: any,
-  cfg: any,
-  rule: any,
-  byDay: any,
+  calendar: calendar_v3.Calendar | null,
+  cfg: CalendarConfig,
+  rule: ScheduleRule,
+  byDay: ByDay,
   place: string,
   dryRun: boolean
 ) => {
   const event = buildEventObject(cfg, rule, byDay, place);
 
   if (dryRun) {
-    const p = event._preview;
+    const startDT = event.start?.dateTime ?? "(no start)";
+    const endDT = event.end?.dateTime ?? "(no end)";
+    const tz = event.start?.timeZone ?? cfg.timezone;
+    const recurrence = event.recurrence?.[0] ?? "";
+    const key = event.extendedProperties?.private?.key ?? "";
     console.log(
       `[DRY-RUN] ${event.summary} | ${place} | BYDAY=${byDay} | ` +
-        `${event.start.dateTime} → ${event.end.dateTime} (${event.start.timeZone}) | ` +
-        `location="${event.location}" colorId=${event.colorId} | ${event.recurrence[0]}, key: ${event.extendedProperties.private.key}`
+        `${startDT} → ${endDT} (${tz}) | ` +
+        `location="${event.location || ""}" colorId=${
+          event.colorId || ""
+        } | ${recurrence}, key: ${key}`
     );
     return;
   }
 
+  if (!calendar) throw new Error("Calendar client unavailable for inserts.");
+
+  const { _preview, ...requestBody } = event;
+
   await calendar.events.insert({
     calendarId: cfg.calendarId,
-    requestBody: event,
+    requestBody: requestBody as calendar_v3.Schema$Event,
   });
   console.log(
     `Created: ${event.summary} | ${place} | ${byDay} ${rule.startTime}-${rule.endTime} | color=${event.colorId}`

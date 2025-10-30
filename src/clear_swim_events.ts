@@ -82,7 +82,7 @@ async function main() {
 
   const timeMin = isoLocalStart(start, timezone);
   const timeMax = isoLocalStart(end, timezone);
-  const privateExtendedProperty = parsePrivateFilter(privateKey);
+  const privateExtendedProperty = parsePrivateFilter(privateKey) ?? undefined;
 
   const auth = await authorize();
   const calendar = google.calendar({ version: "v3", auth });
@@ -101,7 +101,7 @@ async function main() {
     calendarId,
     timeMin,
     timeMax,
-    privateExtendedProperty,
+    ...(privateExtendedProperty ? { privateExtendedProperty } : {}),
   });
 
   if (!events.length) {
@@ -109,7 +109,7 @@ async function main() {
     return;
   }
 
-  const instanceDeletes = [];
+  const instanceDeletes: string[] = [];
   const seriesIds = new Set<string>();
 
   for (const ev of events) {
@@ -125,7 +125,7 @@ async function main() {
 
     if (deleteSeries && ev.recurringEventId) {
       seriesIds.add(ev.recurringEventId);
-    } else {
+    } else if (ev.id) {
       instanceDeletes.push(ev.id);
     }
   }

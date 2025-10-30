@@ -84,18 +84,18 @@ Both scripts accept `--help` for the full CLI reference.
 
 ## Google Calendar Color IDs
 
-| ID  | Name (approx)  | Example |
-| --- | -------------- | ------- |
-| 1   | Blue (default) | 🟦      |
-| 2   | Green          | 🟩      |
-| 3   | Purple         | 🟪      |
-| 4   | Red            | 🟥      |
-| 5   | Yellow         | 🟨      |
-| 6   | Orange         | 🟧      |
-| 7   | Cyan           | 🩵       |
-| 8   | Gray           | ⬜      |
-| 9   | Bold Blue      | 🔵      |
-| 10  | Bold Green     | 🟢      |
-| 11  | Bold Red       | 🔴      |
+| ID  | Name (approx)     | Example |
+| --- | ----------------- | ------- |
+| 1   | Blue (default)    | 🟦      |
+| 2   | Green             | 🟩      |
+| 3   | Purple            | 🟪      |
+| 4   | Red               | 🟥      |
+| 5   | Yellow            | 🟨      |
+| 6   | Orange            | 🟧      |
+| 7   | Cyan ("Peacock")  | 🩵       |
+| 8   | Gray ("Graphite") | ⬜      |
+| 9   | Bold Blue         | 🔵      |
+| 10  | Bold Green        | 🟢      |
+| 11  | Bold Red          | 🔴      |
 
 Use these IDs in `config.json` to align calendar colors with pool expectations.
