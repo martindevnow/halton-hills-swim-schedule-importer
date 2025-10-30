@@ -1,6 +1,6 @@
 // create_swim_events.ts
 // Usage:
-//   node create_swim_events.mjs config.json schedule.csv [--confirm]
+//   node create_swim_events.mjs --config config.json --schedule schedule.csv [--confirm]
 //
 // Deps: npm i googleapis csv-parse
 // Notes:
@@ -13,23 +13,51 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { google } from "googleapis";
+import yargs from "yargs/yargs";
+import { hideBin } from "yargs/helpers";
 import { readJSONSync } from "./utils/helpers.js";
 import { expandRowsToRules, parseScheduleCSV } from "./utils/csv.js";
 import { authorize } from "./utils/auth.js";
 import { createRecurringEvent } from "./utils/calendar.js";
 
+type CliArgs = {
+  config: string;
+  schedule: string;
+  confirm: boolean;
+};
+
+const argv = yargs(hideBin(process.argv))
+  .usage("node $0 --config <config.json> --schedule <schedule.csv> [--confirm]")
+  .option("config", {
+    alias: "c",
+    type: "string",
+    describe: "Path to configuration JSON file",
+    demandOption: true,
+  })
+  .option("schedule", {
+    alias: "s",
+    type: "string",
+    describe: "Path to swim schedule CSV file",
+    demandOption: true,
+  })
+  .option("confirm", {
+    type: "boolean",
+    default: false,
+    describe: "Actually create events (otherwise dry-run)",
+  })
+  .strict()
+  .help()
+  .parseSync() as CliArgs;
+
 // ---------- main ----------
 async function main() {
-  const args = process.argv.slice(2);
-  const dryRun = !args.includes("--confirm");
-  const files = args.filter((a) => !a.startsWith("--"));
-
-  const cfgPath = files[0];
-  const csvPath = files[1];
+  const cfgPath = argv.config;
+  const csvPath = argv.schedule;
+  const dryRun = !argv.confirm;
 
   if (!cfgPath || !csvPath) {
     console.error(
-      "Usage: node create_swim_events.mjs <config.json> <schedule.csv> [--dry-run]"
+      "Usage: node create_swim_events.mjs --config <config.json> --schedule <schedule.csv> [--confirm]"
     );
     process.exit(1);
   }
